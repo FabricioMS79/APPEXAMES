@@ -1,0 +1,78 @@
+from flask import Flask, render_template, request, redirect, url_for
+import sqlite3
+import matplotlib.pyplot as plt
+import io
+import base64
+
+app = Flask(__name__)
+
+# Criação da conexão com o banco de dados
+def get_db_connection():
+    conn = sqlite3.connect('exames.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# Página inicial com opções
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+# Página para cadastrar exames
+@app.route('/adicionar', methods=('GET', 'POST'))
+def adicionar():
+    if request.method == 'POST':
+        nome_exame = request.form['nome_exame']
+        data = request.form['data']
+        valor = float(request.form['valor'])
+        valor_referencia_min = float(request.form['valor_referencia_min'])
+        valor_referencia_max = float(request.form['valor_referencia_max'])
+
+        conn = get_db_connection()
+        conn.execute('INSERT INTO exames (nome_exame, data, valor, valor_referencia_min, valor_referencia_max) VALUES (?, ?, ?, ?, ?)',
+                     (nome_exame, data, valor, valor_referencia_min, valor_referencia_max))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('index'))
+
+    return render_template('adicionar.html')
+
+# Página para visualizar o histórico de um exame
+@app.route('/visualizar', methods=('GET', 'POST'))
+def visualizar():
+    if request.method == 'POST':
+        nome_exame = request.form['nome_exame']
+        conn = get_db_connection()
+        exames = conn.execute('SELECT data, valor, valor_referencia_min, valor_referencia_max FROM exames WHERE nome_exame = ? ORDER BY data ASC', 
+                              (nome_exame,)).fetchall()
+        conn.close()
+
+        # Verificar se há dados
+        if len(exames) == 0:
+            return f"Nenhum dado encontrado para o exame: {nome_exame}"
+
+        # Gerar gráfico
+        fig, ax = plt.subplots()
+        datas = [e['data'] for e in exames]
+        valores = [e['valor'] for e in exames]
+        ref_min = [e['valor_referencia_min'] for e in exames]
+        ref_max = [e['valor_referencia_max'] for e in exames]
+
+        ax.plot(datas, valores, marker='o', label='Resultado do exame')
+        ax.fill_between(datas, ref_min, ref_max, color='gray', alpha=0.2, label='Intervalo de Referência')
+        ax.set_xlabel('Data')
+        ax.set_ylabel('Valor do Exame')
+        ax.set_title(f'Histórico de {nome_exame}')
+        ax.legend()
+
+        # Converter gráfico em imagem
+        img = io.BytesIO()
+        fig.savefig(img, format='png')
+        img.seek(0)
+        graph_url = base64.b64encode(img.getvalue()).decode()
+
+        return render_template('visualizar.html', graph_url=graph_url)
+
+    return render_template('visualizar.html')
+
+if __name__ == '__main__':
+    app.run(debug=True)
